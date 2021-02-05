@@ -9,17 +9,7 @@ import os.path
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
-
-
-#==============================================================================================
-# Global variables
-#==============================================================================================
-
-PRESENTATION_ID 	= '1QHusuwHBOaqzjmA-Z_q01liMabB5ewhQm5JQ0c-c9no'
-ARIS_SHEET_ID 		= '1h1-MBgGrBqJPCHVBnfhFybbfmFdHljFP6oGoTPgR4-c'
-BAU_SHEET_ID		= '19R5DH0wZWuntZ81RR1Pd6eUxqDbkCutKp5uW9lipcT0'
-QRG_FOLDER_ID		= '1uUbfXeN3_b8ziMkarakr5-h_JvBnF-s9'
-
+import textwrap 
 
 #==============================================================================================
 # Functions
@@ -167,7 +157,27 @@ def get_process_steps(process_steps):
 
 	line_a = ""
 	line_b = ""
-	split_steps = process_steps.splitlines()
+
+
+	wrapper = textwrap.TextWrapper(width=100) 
+	split_steps = []
+	# wrapped_text = wrapper.wrap(text=process_steps)
+
+	prev_line_break = False
+
+	for x in process_steps.splitlines():
+		if x == "" and prev_line_break == False:
+			split_steps.append(chr(10))
+			prev_line_break = True
+		else:
+			prev_line_break = False
+		for y in wrapper.wrap(text=x):
+			split_steps.append(y + chr(10))
+
+	
+
+	# split_steps = chr(10).join(split_steps)
+	
 
 	# if there is no process steps 
 	if len(process_steps) == 0:
@@ -175,9 +185,15 @@ def get_process_steps(process_steps):
 	# if there are process steps
 	else:
 		# if the process steps are too long
-		if len(split_steps) > 20:
-			line_a = (chr(10)).join(split_steps[:20]).strip()
-			line_b = (chr(10)).join(split_steps[20:]).strip()
+		max_text_lines = 22
+
+		if len(split_steps) > max_text_lines:
+			print("================================================")
+			print(len(split_steps))
+			# for tt in (chr(10)).join(split_steps[:13]).strip().splitlines(True):
+			# 	print(tt)
+			line_a = ("").join(split_steps[:max_text_lines]).strip()
+			line_b = ("").join(split_steps[max_text_lines:]).strip()
 		else:
 			line_a = process_steps
 	
@@ -219,7 +235,7 @@ def check_if_slide_required_in_doc(counter, document_name, L4Name_value, BAU_L4N
 
 #----------------------------------------------------------------------------------------------
 # get all the files and folders in a folder (used to get the QRG files)
-def get_files_in_folder(drive_response, drive_service, folderToLookIn_id):
+def get_files_in_folder(drive_service, folderToLookIn_id):
 
 	page_token = None
 	files_list = []
@@ -249,26 +265,26 @@ def get_files_in_folder(drive_response, drive_service, folderToLookIn_id):
 
 #----------------------------------------------------------------------------------------------
 # go down the folder directory to find the QRG files
-def get_qrg_files(drive_response, drive_service):
+def get_qrg_files(drive_service):
 	
 	global qrg_list
 	qrg_list = []
 
 	# specific folder directory
-	for L3 in get_files_in_folder(drive_response, drive_service, QRG_FOLDER_ID):
+	for L3 in get_files_in_folder(drive_service, QRG_FOLDER_ID):
 		for folder_L3 in L3:
-			L4 = get_files_in_folder(drive_response, drive_service, folder_L3[1])
+			L4 = get_files_in_folder(drive_service, folder_L3[1])
 			if len(L4) > 0:
 				for folder_L4 in L4[0]:
-					artifact_folder = get_files_in_folder(drive_response, drive_service, folder_L4[1])
+					artifact_folder = get_files_in_folder(drive_service, folder_L4[1])
 					if len(artifact_folder) > 0:
 						for folder_artifact_folder in artifact_folder[0]:
 							if "QRG" in folder_artifact_folder[0]:
-								pdf_folder = get_files_in_folder(drive_response, drive_service, folder_artifact_folder[1])
+								pdf_folder = get_files_in_folder(drive_service, folder_artifact_folder[1])
 								if len(pdf_folder) > 0:
 									for folder_pdf_folder in pdf_folder[0]:
 										if "PDF" in folder_pdf_folder[0]:
-											pdf_files = get_files_in_folder(drive_response, drive_service, folder_pdf_folder[1])
+											pdf_files = get_files_in_folder(drive_service, folder_pdf_folder[1])
 											if len(pdf_files[0]) > 0:
 												for pdf_file in pdf_files[0]:
 													if pdf_file[0].endswith(".pdf"):
@@ -295,12 +311,8 @@ def get_qrg_hyperlink(L4Name):
 
 	return(value)
 
-
-
-
-def get_sheet_values():
-
-	# If modifying these scopes, delete the file token.pickle.
+def connect_to_googleapis():
+# If modifying these scopes, delete the file token.pickle.
 	print(" - Getting Scopes")
 	SCOPES = 	[
 					'https://www.googleapis.com/auth/presentations',
@@ -314,9 +326,7 @@ def get_sheet_values():
 
 	print(" - Getting sheet ranges")
 	# sheet ranges
-	ARIS_EDITED_SHEET_RANGE 	= 'Manual Data Formatted Columns!A1:O'
-	ARIS_SHEET_MANUALDATA_RANGE = 'Manual Data!A1:V'
-	BAU_SHEET_RANGE 			= '*DC!A1:BL'
+
 
 
 	creds = None
@@ -342,13 +352,250 @@ def get_sheet_values():
 	# drive_service 	= get_service(secrets_path, 'https://www.googleapis.com/auth/drive', 'drive', 'v3')
 	drive_service 	= build('drive', 'v3', credentials=creds)
 
+	return(service, service_sheet, drive_service)
+
+def get_layouts(presentation):
+	# get the layout for steps
+	steps_layout = presentation["layouts"][2]
+	steps_layout["layoutProperties"]["name"] = "STEPS_A"
+
+	return(steps_layout)
+
+def create_slides(row_start, row_end, document_name, presentation_copy_id):
+
+	print("- Creating Slides")
+	slide_counter 	= 0
+	reqs 			= []
+
+	# go through each row of the sheet and create a slide
+	for row in arisEdited_rows[row_start:row_end]:
+
+		bau_row_counter = get_BAU_row_number(BAU_L4Name_col, row[L4Name_col_num])	
+
+		if check_if_slide_required_in_doc(bau_row_counter, document_name, row[L4Name_col_num], BAU_L4Name_col, BAU_DC_Returns_col, BAU_RC_Returns_CEN_col, BAU_RC_Returns_BRK_col) == True:
+
+			# print("Creating slide: " + str(slide_counter))
+
+			# google slide creates a slide
+			reqs.append([
+			{
+				'createSlide': 
+				{
+					'insertionIndex': str(slide_counter),
+					'slideLayoutReference': 
+					{
+						"layoutId": 'gb7b81678ae_0_20'
+					}
+				}
+			},
+			])
+
+			slide_counter += 1
+
+	# update and get the presentation
+	presentation = service.presentations().batchUpdate(body={'requests': reqs}, presentationId = presentation_copy_id).execute().get('replies')
+	presentation = service.presentations().get(presentationId=presentation_copy_id).execute()
+
+	print("- Slides Created")
+
+	return(presentation)
+
+
+def update_slides(row_start, row_end, document_name, presentation, presentation_copy_id):
+
+	print("- Updating Slides")
+
+	slide_counter = 0
+	reqs_text 		= []
+	ITF_list = []
+
+
+	# update the slides
+	for row in arisEdited_rows[row_start:row_end]:
+
+		bau_row_counter = get_BAU_row_number(BAU_L4Name_col, row[L4Name_col_num])	
+
+		# check whether this information is required for this filtered document publish
+		if check_if_slide_required_in_doc(bau_row_counter, document_name, row[L4Name_col_num], BAU_L4Name_col, BAU_DC_Returns_col, BAU_RC_Returns_CEN_col, BAU_RC_Returns_BRK_col) == True:
+		
+			slide_title 	= row[BAUNumbers_col_num] + " | " + get_DCRC(BAU_DC_Returns_col[bau_row_counter[1]], BAU_RC_Returns_CEN_col[bau_row_counter[1]], BAU_RC_Returns_BRK_col[bau_row_counter[1]]) + " | " + row[L4Name_col_num]
+			slide_overview 	= remove_existing_headers(row[Overview_col_num])
+			slide_process 	= remove_existing_headers(row[ProcessSteps_col_num])
+
+			# check if the step is an interface(ITF)
+			if bau_System_value[bau_row_counter[1]] == "ITF":
+				ITF_list.append(chr(10) + slide_title + chr(10) + slide_overview + chr(10))
+
+				# ITF_slide_counter = slide_counter - 1
+			
+			# if not an interface
+			else:
+				if len(ITF_list)>0:
+
+					slide_process_text = "Process Steps: (User based)" + chr(10) + prev_slide_process  + chr(10) + chr(10) + "Interface Steps: (Automated)" + chr(10) + "".join(ITF_list)
+					
+					process_steps = [get_process_steps(slide_process_text)[1], get_process_steps(slide_process_text)[0]]
+
+					counter = 5
+					for process_step in process_steps:
+
+						value = process_step
+						
+						# for elem in  presentation['slides'][slide_counter-1]['pageElements'][counter]['shape']['text']:
+						# 	# ['shape']['shapeProperties']
+						# 	print(elem)
+						# print(presentation['slides'][slide_counter-1])
+				
+						# exit()
+						# if counter == 6:
+						reqs_text.append([
+						{
+							'insertText':
+							{
+								"objectId": presentation['slides'][slide_counter-1]['pageElements'][counter]['objectId'],#presentation['slides'][0]['pageElements'][0]['objectId'],
+								"text": "aaa",#"test1",
+								"insertionIndex": 0
+							}
+						},
+						])
+						reqs_text.append([
+						{
+							'deleteText':
+							{
+								"objectId": presentation['slides'][slide_counter-1]['pageElements'][counter]['objectId'],#presentation['slides'][0]['pageElements'][0]['objectId'],
+								"textRange":
+								{
+									# "startIndex": 0,
+									# "endIndex": 9999,
+									"type": "ALL"
+								}
+							}
+						}
+						])
+						reqs_text.append([
+						{
+							'insertText':
+							{
+								"objectId": presentation['slides'][slide_counter-1]['pageElements'][counter]['objectId'],#presentation['slides'][0]['pageElements'][0]['objectId'],
+								"text": value,#"test1",
+								"insertionIndex": 0
+							}
+						},
+						])
+
+						counter +=1
+
+				ITF_list = []				
+
+				if row[BAUNumbers_col_num] != "":
+
+					counter = 0
+
+					list_slide_dict = {
+					'system_aris' 		: get_system(row[L4System_col_num]),
+					'roles_aris'		: get_roles(row[L4Roles_col_num], bau_System_value[bau_row_counter[1]]),
+					'transaction_code' 	: get_transaction_code(row[TransactionCode_col_num], bau_System_value[bau_row_counter[1]]),
+					'slide_title' 		: slide_title,
+					'L3Name' 			: row[L3Name_col_num],
+					'process_steps_r'	: get_process_steps(slide_process)[1],
+					'process_steps_l' 	: get_process_steps(slide_process)[0],
+					'slide_overview' 	: slide_overview,
+					'qrg_hyperlink' 	: get_qrg_hyperlink(row[L4Name_col_num]),
+					'other'				: remove_existing_headers(get_other(row[Other_col_num])),
+					'note' 				: remove_existing_headers(get_note(row[Note_col_num])),
+					}		
+
+					previous_slide_dict = list_slide_dict
+					list_slide_text = list(list_slide_dict.values())
+					list_slide_keys = list(list_slide_dict)
+
+					# list_slide_text = [
+					# 	get_system(row[L4System_col_num]),
+					# 	get_roles(row[L4Roles_col_num], bau_System_value[bau_row_counter[1]]),
+					# 	get_transaction_code(row[TransactionCode_col_num], bau_System_value[bau_row_counter[1]]),
+					# 	slide_title,
+					# 	row[L3Name_col_num],
+					# 	get_process_steps(slide_process)[1],
+					# 	get_process_steps(slide_process)[0],
+					# 	slide_overview,
+					# 	get_qrg_hyperlink(row[L4Name_col_num]),
+					# 	remove_existing_headers(get_other(row[Other_col_num])),
+					# 	remove_existing_headers(get_note(row[Note_col_num])),
+					# 	]
+
+
+					for x in presentation['slides'][slide_counter]['pageElements']:
+
+						value = list_slide_text[counter]
+						# if(len(list_slide_text[counter]) == 2):
+						if list_slide_keys[counter] == "qrg_hyperlink":
+							value = list_slide_text[counter][0]
+
+						# print(value)
+							
+
+						reqs_text.append([
+						{
+							'insertText':
+							{
+								"objectId": x['objectId'],#presentation['slides'][0]['pageElements'][0]['objectId'],
+								"text": value,#"test1",
+								"insertionIndex": 0
+							}
+						},
+						])
+
+					
+
+						# if(len(list_slide_text[counter]) == 2):
+						if list_slide_keys[counter] == "qrg_hyperlink":
+							# print(list_slide_text[counter])
+							if list_slide_text[counter][1] != None:
+								# if (list_slide_text[counter] != ""):
+
+								reqs_text.append([
+								{								
+									
+									"updateTextStyle": 
+									{
+										'objectId': x['objectId'],
+										"style": 
+										{	
+											"link": 
+											{
+												"url": list_slide_text[counter][1]  # Please set the modified URL here.
+											}
+										},
+										"fields": "*"
+									}
+								},
+								])
+
+
+						counter += 1
+
+
+					prev_slide_process = slide_process
+					slide_counter += 1
+
+
+	presentation = service.presentations().batchUpdate(body={'requests': reqs_text}, presentationId = presentation_copy_id).execute().get('replies')
+
+	return(presentation)
+	print("- Slides Updated")
+
+
+def get_sheet_values():
+
+
+
 	for document_name in ["DC_Returns", "RC_Returns_Centurion", "RC_Returns_Brackenfell"]:
 
+		print("Starting on: " + document_name)
 		# Call the Slides API
-		print(" - Calling document API's")
 		
-		global arisEdited_sheet_result
-		global bau_sheet_result
+		# arisEdited_sheet_result
+		# bau_sheet_result
 		global presentation
 
 
@@ -357,230 +604,108 @@ def get_sheet_values():
 		presentation_copy_id = drive_response.get('id')
 		
 
-		presentation 			= service.presentations().get(presentationId=presentation_copy_id).execute()
-		arisEdited_sheet_result = service_sheet.spreadsheets().values().get(spreadsheetId=ARIS_SHEET_ID, range=ARIS_EDITED_SHEET_RANGE).execute()
-		aris_sheet_bau			= service_sheet.spreadsheets().values().get(spreadsheetId=ARIS_SHEET_ID, range=ARIS_SHEET_MANUALDATA_RANGE).execute()
+		presentation = service.presentations().get(presentationId=presentation_copy_id).execute()
+
+
+
+		steps_layout = get_layouts(presentation)
 		
-		# get the rows from the sheet
-		arisEdited_rows = arisEdited_sheet_result.get('values', [])
-		# bau_rows 		= bau_sheet_result.get('values', [])
-		aris_bau_rows 	= aris_sheet_bau.get('values', []) 
+		slides = presentation.get('slides')		
 		
-		# get the number for each column by using their name
-		L3Name_col_num 				= arisEdited_rows[0].index("L3Name")
-		L3Num_col_num 				= arisEdited_rows[0].index("L3Num")
-		L3Desc_col_num 				= arisEdited_rows[0].index("L3Desc")
-		L4Name_col_num 				= arisEdited_rows[0].index("L4Name")
-		L4Desc_col_num 				= arisEdited_rows[0].index("L4Desc")
-		Overview_col_num 			= arisEdited_rows[0].index("Overview")
-		ProcessSteps_col_num 		= arisEdited_rows[0].index("Process Steps")
-		Note_col_num 				= arisEdited_rows[0].index("Note")
-		Other_col_num 				= arisEdited_rows[0].index("Other")
-		TransactionCode_col_num 	= arisEdited_rows[0].index("Transaction Code")
-		RC_col_num 					= arisEdited_rows[0].index("RC")
-		DC_col_num 					= arisEdited_rows[0].index("DC")
-		L4Roles_col_num 			= arisEdited_rows[0].index("L4Roles")
-		L4System_col_num 			= arisEdited_rows[0].index("L4System")
-		BAUNumbers_col_num 			= arisEdited_rows[0].index("BAU Numbers")
-
-		# get the number for each column by using their name
-		raw_L3Name_col_num 				= aris_bau_rows[0].index("L3Name")
-		raw_L3Num_col_num 				= aris_bau_rows[0].index("L3Num")
-		raw_L3Desc_col_num 				= aris_bau_rows[0].index("L3Desc")
-		raw_L4Name_col_num 				= aris_bau_rows[0].index("L4Name")
-		raw_L4Desc_col_num 				= aris_bau_rows[0].index("L4Desc")
-		raw_Overview_col_num 			= aris_bau_rows[0].index("Overview")
-		raw_ProcessSteps_col_num 		= aris_bau_rows[0].index("Process Steps")
-		raw_Note_col_num 				= aris_bau_rows[0].index("Note")
-		raw_Other_col_num 				= aris_bau_rows[0].index("Other")
-		raw_TransactionCode_col_num 	= aris_bau_rows[0].index("Transaction Code")
-		raw_RC_col_num 					= aris_bau_rows[0].index("RC")
-		raw_DC_col_num 					= aris_bau_rows[0].index("DC")
-		raw_L4Roles_col_num 			= aris_bau_rows[0].index("L4Roles")
-		raw_L4System_col_num 			= aris_bau_rows[0].index("L4System")
-		raw_BAUNumbers_col_num 			= aris_bau_rows[0].index("BAU Numbers")
-
-		bau_ArtifactNum_col_num			= aris_bau_rows[0].index("BAU_ArtifactNum_value")
-		bau_System_value_col_num		= aris_bau_rows[0].index("BAU_System_value")
-		bau_TransactionCode_col_num		= aris_bau_rows[0].index("BAU_TransactionCode_value")
-
-
-		# ARIS with BAU
-		BAU_DC_Returns_value_col_num		= aris_bau_rows[0].index("BAU_DC_Returns_value")
-		BAU_RC_Returns_CEN_value_col_num	= aris_bau_rows[0].index("BAU_RC_Returns_CEN_value")
-		BAU_RC_Returns_BRK_value_col_num	= aris_bau_rows[0].index("BAU_RC_Returns_BRK_value")
-		BAU_L4Name_value_col_num			= aris_bau_rows[0].index("BAU_L4Name_value")
-
-		BAU_DC_Returns_col				= [row[BAU_DC_Returns_value_col_num] for row in aris_bau_rows]
-		BAU_RC_Returns_CEN_col			= [row[BAU_RC_Returns_CEN_value_col_num] for row in aris_bau_rows]
-		BAU_RC_Returns_BRK_col			= [row[BAU_RC_Returns_BRK_value_col_num] for row in aris_bau_rows]
-		BAU_L4Name_col		 			= [row[BAU_L4Name_value_col_num] for row in aris_bau_rows]
-
-		BAU_ArtifactNum_value  			= [row[bau_ArtifactNum_col_num] for row in aris_bau_rows]
-		bau_System_value 				= [row[bau_System_value_col_num] for row in aris_bau_rows]
-		bau_TransactionCode_value 		= [row[bau_TransactionCode_col_num] for row in aris_bau_rows]
-
-		
-		# populates the list of qrg's and their links
-		get_qrg_files(drive_response, drive_service)
-
-		print("QRG LIST")
-		print(qrg_list)
-		
-		steps_layouts = presentation["layouts"][2]#['pageElements'];
-		
-		steps_layouts["layoutProperties"]["name"] = "STEPS_A"
-		
-		slides = presentation.get('slides')
-
-		print("- Creating Slides")
-		
-		slide_counter 	= 0
-		reqs 			= []
-		reqs_text 		= []
 
 		row_start 		= 1
 		row_end 		= 500
 
-		# go through each row of the sheet and create a slide
-		for row in arisEdited_rows[row_start:row_end]:
-
-			bau_row_counter = get_BAU_row_number(BAU_L4Name_col, row[L4Name_col_num])	
-
-			if check_if_slide_required_in_doc(bau_row_counter, document_name, row[L4Name_col_num], BAU_L4Name_col, BAU_DC_Returns_col, BAU_RC_Returns_CEN_col, BAU_RC_Returns_BRK_col) == True:
-
-				# print("Creating slide: " + str(slide_counter))
-
-				# google slide creates a slide
-				reqs.append([
-				{
-					'createSlide': 
-					{
-						'insertionIndex': str(slide_counter),
-						'slideLayoutReference': 
-						{
-							"layoutId": 'gb7b81678ae_0_20'
-						}
-					}
-				},
-				])
-
-				slide_counter += 1
-
-		# update and get the presentation
-		presentation = service.presentations().batchUpdate(body={'requests': reqs}, presentationId = presentation_copy_id).execute().get('replies')
-		presentation = service.presentations().get(presentationId=presentation_copy_id).execute()
-			
+		
+		presentation = create_slides(row_start, row_end, document_name, presentation_copy_id)
+		presentation = update_slides(row_start, row_end, document_name, presentation, presentation_copy_id)
 
 
-		print("- Slides Created")
-		print("- Updating Slides")
+		
+#==============================================================================================
+# Global variables
+#==============================================================================================
+
+PRESENTATION_ID 					= '1QHusuwHBOaqzjmA-Z_q01liMabB5ewhQm5JQ0c-c9no'
+ARIS_SHEET_ID 						= '1h1-MBgGrBqJPCHVBnfhFybbfmFdHljFP6oGoTPgR4-c'
+BAU_SHEET_ID						= '19R5DH0wZWuntZ81RR1Pd6eUxqDbkCutKp5uW9lipcT0'
+QRG_FOLDER_ID						= '1uUbfXeN3_b8ziMkarakr5-h_JvBnF-s9'
+
+ARIS_EDITED_SHEET_RANGE 			= 'Manual Data Formatted Columns!A1:O'
+ARIS_SHEET_MANUALDATA_RANGE 		= 'Manual Data!A1:V'
+BAU_SHEET_RANGE 					= '*DC!A1:BL'
+
+print(" - Calling document API's")
+service, service_sheet, drive_service = connect_to_googleapis()
+
+arisEdited_sheet_result 			= service_sheet.spreadsheets().values().get(spreadsheetId=ARIS_SHEET_ID, range=ARIS_EDITED_SHEET_RANGE).execute()
+aris_sheet_bau						= service_sheet.spreadsheets().values().get(spreadsheetId=ARIS_SHEET_ID, range=ARIS_SHEET_MANUALDATA_RANGE).execute()
+
+# get the rows from the sheet
+arisEdited_rows 					= arisEdited_sheet_result.get('values', [])
+aris_bau_rows 						= aris_sheet_bau.get('values', []) 
+
+# get the number for each column by using their name
+L3Name_col_num 						= arisEdited_rows[0].index("L3Name")
+L3Num_col_num 						= arisEdited_rows[0].index("L3Num")
+L3Desc_col_num 						= arisEdited_rows[0].index("L3Desc")
+L4Name_col_num 						= arisEdited_rows[0].index("L4Name")
+L4Desc_col_num 						= arisEdited_rows[0].index("L4Desc")
+Overview_col_num 					= arisEdited_rows[0].index("Overview")
+ProcessSteps_col_num 				= arisEdited_rows[0].index("Process Steps")
+Note_col_num 						= arisEdited_rows[0].index("Note")
+Other_col_num 						= arisEdited_rows[0].index("Other")
+TransactionCode_col_num 			= arisEdited_rows[0].index("Transaction Code")
+RC_col_num 							= arisEdited_rows[0].index("RC")
+DC_col_num 							= arisEdited_rows[0].index("DC")
+L4Roles_col_num 					= arisEdited_rows[0].index("L4Roles")
+L4System_col_num 					= arisEdited_rows[0].index("L4System")
+BAUNumbers_col_num 					= arisEdited_rows[0].index("BAU Numbers")
+
+# get the number for each column by using their name
+raw_L3Name_col_num 					= aris_bau_rows[0].index("L3Name")
+raw_L3Num_col_num 					= aris_bau_rows[0].index("L3Num")
+raw_L3Desc_col_num 					= aris_bau_rows[0].index("L3Desc")
+raw_L4Name_col_num 					= aris_bau_rows[0].index("L4Name")
+raw_L4Desc_col_num 					= aris_bau_rows[0].index("L4Desc")
+raw_Overview_col_num 				= aris_bau_rows[0].index("Overview")
+raw_ProcessSteps_col_num 			= aris_bau_rows[0].index("Process Steps")
+raw_Note_col_num 					= aris_bau_rows[0].index("Note")
+raw_Other_col_num 					= aris_bau_rows[0].index("Other")
+raw_TransactionCode_col_num 		= aris_bau_rows[0].index("Transaction Code")
+raw_RC_col_num 						= aris_bau_rows[0].index("RC")
+raw_DC_col_num 						= aris_bau_rows[0].index("DC")
+raw_L4Roles_col_num 				= aris_bau_rows[0].index("L4Roles")
+raw_L4System_col_num 				= aris_bau_rows[0].index("L4System")
+raw_BAUNumbers_col_num 				= aris_bau_rows[0].index("BAU Numbers")
+bau_ArtifactNum_col_num				= aris_bau_rows[0].index("BAU_ArtifactNum_value")
+bau_System_value_col_num			= aris_bau_rows[0].index("BAU_System_value")
+bau_TransactionCode_col_num			= aris_bau_rows[0].index("BAU_TransactionCode_value")
 
 
+# ARIS with BAU
+BAU_DC_Returns_value_col_num		= aris_bau_rows[0].index("BAU_DC_Returns_value")
+BAU_RC_Returns_CEN_value_col_num	= aris_bau_rows[0].index("BAU_RC_Returns_CEN_value")
+BAU_RC_Returns_BRK_value_col_num	= aris_bau_rows[0].index("BAU_RC_Returns_BRK_value")
+BAU_L4Name_value_col_num			= aris_bau_rows[0].index("BAU_L4Name_value")
 
-		slide_counter = 0
-		ITF_list = []
+BAU_DC_Returns_col					= [row[BAU_DC_Returns_value_col_num] for row in aris_bau_rows]
+BAU_RC_Returns_CEN_col				= [row[BAU_RC_Returns_CEN_value_col_num] for row in aris_bau_rows]
+BAU_RC_Returns_BRK_col				= [row[BAU_RC_Returns_BRK_value_col_num] for row in aris_bau_rows]
+BAU_L4Name_col		 				= [row[BAU_L4Name_value_col_num] for row in aris_bau_rows]
 
-
-		# update the slides
-		for row in arisEdited_rows[row_start:row_end]:
-
-			bau_row_counter = get_BAU_row_number(BAU_L4Name_col, row[L4Name_col_num])	
-
-			# check whether this information is required for this filtered document publish
-			if check_if_slide_required_in_doc(bau_row_counter, document_name, row[L4Name_col_num], BAU_L4Name_col, BAU_DC_Returns_col, BAU_RC_Returns_CEN_col, BAU_RC_Returns_BRK_col) == True:
-			
-				slide_title 	= row[BAUNumbers_col_num] + " | " + get_DCRC(BAU_DC_Returns_col[bau_row_counter[1]], BAU_RC_Returns_CEN_col[bau_row_counter[1]], BAU_RC_Returns_BRK_col[bau_row_counter[1]]) + " | " + row[L4Name_col_num]
-				slide_overview 	= remove_existing_headers(row[Overview_col_num])
-				slide_process 	= remove_existing_headers(row[ProcessSteps_col_num])
-
-				# check if the step is an interface(ITF)
-				if bau_System_value[bau_row_counter[1]] == "ITF":
-					ITF_list.append(chr(10) + slide_title + chr(10) + slide_overview + chr(10))
-				
-				# if not an interface
-				else:
-					if len(ITF_list)>0:
-						slide_process = "Interface Steps: (Automated)" + chr(10) + "".join(ITF_list) + chr(10) + "Process Steps: (User based)" + chr(10) + slide_process
-
-					ITF_list = []				
-
-					if row[BAUNumbers_col_num] != "":
-
-						counter = 0
-
-						list_slide_text = [
-							get_system(row[L4System_col_num]),
-							get_roles(row[L4Roles_col_num], bau_System_value[bau_row_counter[1]]),
-							get_transaction_code(row[TransactionCode_col_num], bau_System_value[bau_row_counter[1]]),
-							slide_title,
-							row[L3Name_col_num],
-							get_process_steps(slide_process)[1],
-							get_process_steps(slide_process)[0],
-							slide_overview,
-							get_qrg_hyperlink(row[L4Name_col_num]),
-							remove_existing_headers(get_other(row[Other_col_num])),
-							remove_existing_headers(get_note(row[Note_col_num])),
-							]
-
-						previous_slide_text = list_slide_text
-
-						for x in presentation['slides'][slide_counter]['pageElements']:
-
-							value = list_slide_text[counter]
-							if(len(list_slide_text[counter]) == 2):
-								value = list_slide_text[counter][0]
-
-							# print(value)
-								
-
-							reqs_text.append([
-							{
-								'insertText':
-								{
-									"objectId": x['objectId'],#presentation['slides'][0]['pageElements'][0]['objectId'],
-									"text": value,#"test1",
-									"insertionIndex": 0
-								}
-							},
-							])
-
-						
-
-							if(len(list_slide_text[counter]) == 2):
-								# print(list_slide_text[counter])
-								if list_slide_text[counter][1] != None:
-									# if (list_slide_text[counter] != ""):
-
-									reqs_text.append([
-									{								
-										
-										"updateTextStyle": 
-										{
-											'objectId': x['objectId'],
-											"style": 
-											{	
-												"link": 
-												{
-													"url": list_slide_text[counter][1]  # Please set the modified URL here.
-												}
-											},
-											"fields": "*"
-										}
-									},
-									])
+BAU_ArtifactNum_value  				= [row[bau_ArtifactNum_col_num] for row in aris_bau_rows]
+bau_System_value 					= [row[bau_System_value_col_num] for row in aris_bau_rows]
+bau_TransactionCode_value 			= [row[bau_TransactionCode_col_num] for row in aris_bau_rows]
 
 
-							counter += 1
+# populates the list of qrg's and their links
+get_qrg_files(drive_service)
 
 
+#==============================================================================================
+# Start
+#==============================================================================================
 
-						slide_counter += 1
-
-
-		presentation = service.presentations().batchUpdate(body={'requests': reqs_text}, presentationId = presentation_copy_id).execute().get('replies')
-		print("- Slides Updated")
-
-# documents_setup()
 get_sheet_values()
 
